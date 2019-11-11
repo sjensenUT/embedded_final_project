@@ -1,0 +1,6 @@
+[submodule "timing-harness"]
+	path = timing-harness
+	url = https://github.com/ithemal/timing-harness
+[submodule "bhive"]
+	path = bhive
+	url = https://github.com/ithemal/bhive
