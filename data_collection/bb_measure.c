@@ -42,6 +42,14 @@ uint8_t *hex2bin(char *hex) {
   return bin;
 }
 
+void check_shm_fd(int fd)
+{
+  if (fd == -1)
+  {
+    printf("Something went wrong with SHM FD's\n");
+    exit(-1);
+  }
+}
 
 /*
 
@@ -96,7 +104,6 @@ int main (int argc, char** argv)
     // Ignore empty basic blocks
     if (line[0] == ',')
     {
-      failures++;
       continue;
     }
 
@@ -136,12 +143,14 @@ int main (int argc, char** argv)
         // Now run the measurement with both unroll factors 10 times. (10 = HARNESS_ITERS)
         // This loop is handled within the measure function.
         // For some reason you need to make a new fd each time
-        shm_fd = create_shm_fd("shm-path");   
+        shm_fd = create_shm_fd("shm-path");  
+        check_shm_fd(shm_fd); 
         struct pmc_counters *countersA = measure(
             bb_bin, bb_length, unrollFactorA,
             &l1_read_supported, &l1_write_supported, &icache_supported, shm_fd);
 
         shm_fd = create_shm_fd("shm-path");
+        check_shm_fd(shm_fd);
         struct pmc_counters *countersB = measure(
             bb_bin, bb_length, unrollFactorB,
             &l1_read_supported, &l1_write_supported, &icache_supported, shm_fd); 
@@ -158,8 +167,17 @@ int main (int argc, char** argv)
         int j;
         for (j = 1; j < HARNESS_ITERS; j++)
         {
-          if ( minA == -1 || countersA[j].core_cyc < minA ) minA = countersA[j].core_cyc;
-          if ( minB == -1 || countersB[j].core_cyc < minB ) minB = countersB[j].core_cyc;
+          int cyc_a = countersA[j].core_cyc;
+          int cyc_b = countersB[j].core_cyc;
+          if ( cyc_a > 0 && (minA == -1 || cyc_a < minA) ) minA = cyc_a;
+          if ( cyc_b > 0 && (minB == -1 || cyc_b < minB) ) minB = cyc_b;
+        }
+
+        // Invalid measurement if minB < minA
+        if (minB <= minA) 
+        {
+          measurementFailed = true;
+          break;
         }
    
     }
@@ -187,7 +205,7 @@ int main (int argc, char** argv)
     // Print the first few outputs to stdout as well (for debugging)
     if (i < 10)
     {
-      printf("%s,%f\n", bb_hex, bb_estimate);
+      printf("\n\n%s,%f\n\n\n", bb_hex, bb_estimate);
     } else if (i == 11) {
       printf("...\n\n");
     }
