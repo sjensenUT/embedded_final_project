@@ -20,6 +20,7 @@
 
 #define MAX_LINE_LENGTH 4096
 #define MEASURES_PER_BB 5
+#define SIZE_OF_HARNESS_MEM (4096 * 3)
 
 uint8_t parse_hex_digit(char c) {
   if (c >= 'a' && c <= 'f')
@@ -49,6 +50,12 @@ void check_shm_fd(int fd)
     printf("Something went wrong with SHM FD's\n");
     exit(-1);
   }
+}
+
+int create_shm_fd_2(char *path) {
+  int fd = shm_open(path, O_RDWR|O_CREAT, 0777);
+  ftruncate(fd, SIZE_OF_HARNESS_MEM);
+  return fd;
 }
 
 /*
@@ -95,6 +102,10 @@ int main (int argc, char** argv)
   int failures  = 0;
   int successes = 0;
 
+  // See if we can get away with just one fd
+  int shm_fd_a = create_shm_fd_2("shm-path-a");
+  int shm_fd_b = create_shm_fd_2("shm-path-b");
+
   while ( fscanf(ifile, "%s\n", line) == 1 )
   {
     // See if we've run enough iterations
@@ -104,6 +115,7 @@ int main (int argc, char** argv)
     // Ignore empty basic blocks
     if (line[0] == ',')
     {
+      printf("Empty basic block on iter %d\n", i);
       continue;
     }
 
@@ -129,7 +141,6 @@ int main (int argc, char** argv)
     
     int l1_read_supported, l1_write_supported, icache_supported;
 
-    int shm_fd;
     int minA = -1;
     int minB = -1;
 
@@ -142,22 +153,19 @@ int main (int argc, char** argv)
 
         // Now run the measurement with both unroll factors 10 times. (10 = HARNESS_ITERS)
         // This loop is handled within the measure function.
-        // For some reason you need to make a new fd each time
-        shm_fd = create_shm_fd("shm-path");  
-        check_shm_fd(shm_fd); 
         struct pmc_counters *countersA = measure(
             bb_bin, bb_length, unrollFactorA,
-            &l1_read_supported, &l1_write_supported, &icache_supported, shm_fd);
+            &l1_read_supported, &l1_write_supported, &icache_supported, shm_fd_a);
 
-        shm_fd = create_shm_fd("shm-path");
-        check_shm_fd(shm_fd);
         struct pmc_counters *countersB = measure(
             bb_bin, bb_length, unrollFactorB,
-            &l1_read_supported, &l1_write_supported, &icache_supported, shm_fd); 
+            &l1_read_supported, &l1_write_supported, &icache_supported, shm_fd_b); 
         
 
         if (!countersA || !countersB)
         {
+          if (!countersA) printf("Measurement A failed on iter %d\n", i);
+          if (!countersB) printf("Measurement B failed on iter %d\n", i);
           measurementFailed = true;
           break;
         }
@@ -176,6 +184,7 @@ int main (int argc, char** argv)
         // Invalid measurement if minB < minA
         if (minB <= minA) 
         {
+          printf("Invalid measurement (B faster than A) on iter %d: (%d, %d)\n", i, minA, minB);
           measurementFailed = true;
           break;
         }
@@ -205,18 +214,23 @@ int main (int argc, char** argv)
     // Print the first few outputs to stdout as well (for debugging)
     if (i < 10)
     {
-      printf("\n\n%s,%f\n\n\n", bb_hex, bb_estimate);
+      printf("%s,%f\n", bb_hex, bb_estimate);
     } else if (i == 11) {
       printf("...\n\n");
+    } else if (i % 100 == 0) {
+      printf("Progress: i = %d\n", i);
     }
     
   }
+
+  shm_unlink("shm-path-a");
+  shm_unlink("shm-path-b");
 
   fclose(ifile);
   fclose(ofile);
 
   // Print successes/failures
-  printf("Successfully collected BB performance data for %d out of %d blocks.\n",
+  printf("Successfully collected BB throughput data for %d out of %d blocks.\n",
          successes, successes + failures);
 
   return 0;
