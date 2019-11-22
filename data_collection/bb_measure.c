@@ -22,7 +22,7 @@
 #define MEASURES_PER_BB 5
 #define SIZE_OF_HARNESS_MEM (4096 * 3)
 #define REF_COMPARE_THRESHOLD 0.2
-#define MAX_BB_LENGTH 240
+#define MAX_BB_LENGTH 600
 
 const int ITERS_TO_SKIP[2] = {1001, 6621};
 
@@ -62,6 +62,26 @@ int create_shm_fd_2(char *path) {
   return fd;
 }
 
+int shm_fd_a, shm_fd_b;
+
+void open_shms()
+{
+  shm_fd_a = create_shm_fd_2("shm-path-a");
+  shm_fd_b = create_shm_fd_2("shm-path-b");
+}
+
+void close_shms()
+{
+  shm_unlink("shm-path-a");
+  shm_unlink("shm-path-b");
+}
+
+void reinit_shms()
+{
+  close_shms();
+  open_shms();  
+}
+
 /*
 
 argv[1]: Input file name with basic blocks, e.g. skl.csv
@@ -72,8 +92,6 @@ argv[4]: Number of basic blocks to measure, default entire input file.
 */
 int main (int argc, char** argv)
 {
-
-  printf("%d %d\n", ITERS_TO_SKIP[0], ITERS_TO_SKIP[1]);
 
   if (argc != 3 && argc != 5)
   {
@@ -104,15 +122,14 @@ int main (int argc, char** argv)
   char line[MAX_LINE_LENGTH];  
 
   int unrollFactorA, unrollFactorB;
+  float scaleFactor;
   int i = 0;
   int failures  = 0;
   int successes = 0;
 
-  // See if we can get away with just one fd
-  int shm_fd_a = create_shm_fd_2("shm-path-a");
-  int shm_fd_b = create_shm_fd_2("shm-path-b");
+  open_shms();
 
-  int iters_to_skip_size = sizeof(ITERS_TO_SKIP)/sizeof(int);
+  //int iters_to_skip_size = sizeof(ITERS_TO_SKIP)/sizeof(int);
 
   while ( fscanf(ifile, "%s\n", line) == 1 )
   {
@@ -120,7 +137,7 @@ int main (int argc, char** argv)
     i++;
     if (numIters > -1 && i > numIters) break;
 
-    // See if we should skip this BB (numbers hard-coded for convenience)
+    /*// See if we should skip this BB (numbers hard-coded for convenience)
     int w;
     bool skipThisIter = false;
     for (w = 0; w < iters_to_skip_size; w++) {
@@ -133,7 +150,7 @@ int main (int argc, char** argv)
     if (skipThisIter) {
       printf("Skipping iteration %d\n", i);
       continue;
-    }
+    }*/
 
     // Ignore empty basic blocks
     if (line[0] == ',')
@@ -154,19 +171,22 @@ int main (int argc, char** argv)
     if (bb_length > MAX_BB_LENGTH) continue;
 
     
-   /* if (bb_length < 100) {
+    if (bb_length < 100) {
       unrollFactorA = 100;
       unrollFactorB = 200;
+      scaleFactor = 1.0;
     } else if (bb_length < 200) {
       unrollFactorA = 50;
       unrollFactorB = 100;
+      scaleFactor = 2.0;
     } else {
       unrollFactorA = 16;
       unrollFactorB = 32;
-    }*/
-    // TEMP (?)
-    unrollFactorA = 100;
-    unrollFactorB = 200;
+      scaleFactor = 100.0/16.0;
+    }
+    // TEMP
+    //unrollFactorA = 100;
+    //unrollFactorB = 200;
     
     bb_bin = hex2bin(bb_hex);
     
@@ -203,13 +223,15 @@ int main (int argc, char** argv)
           if (!countersB) {
              printf("Measurement B failed on iter %d (bb_length = %d)\n", i, bb_length);
           }
-          shm_unlink("shm-path-a");
-          shm_unlink("shm-path-b");
+          // Try to close an re-open the SHMs in hope that the next BB will succeed.
+          //reinit_shms();
+          //measurementFailed = true;
+          //break;
+          // Can't figure out how to recover from this type of failure...
+          close_shms();
           fclose(ifile);
           fclose(ofile);
           exit(-1);
-          //measurementFailed = true;
-          //break;
         }
 
         // Calculate the shortest execution time for A and B
@@ -252,10 +274,9 @@ int main (int argc, char** argv)
     }
  
     // The estimated cycle count for the basic block is now the difference of 
-    // the minimums. Note that we do not divide by the difference in unroll 
-    // factor. I'm not sure why not, but looking at the bhive data, they 
-    // just recorded the throughput of the unrolled BB.
-    float bb_estimate = minB - minA;
+    // the minimums, multiplied by the scale factor (need to confirm with BHive
+    // researchers that this is what they did)
+    float bb_estimate = (minB - minA) * scaleFactor;
 
     // Skip the sample and mark as failure if the measurement is more than 50%
     // different than the measurement file.
@@ -290,8 +311,7 @@ int main (int argc, char** argv)
     
   }
 
-  shm_unlink("shm-path-a");
-  shm_unlink("shm-path-b");
+  close_shms();
 
   fclose(ifile);
   fclose(ofile);
