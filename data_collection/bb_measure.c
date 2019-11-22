@@ -21,6 +21,10 @@
 #define MAX_LINE_LENGTH 4096
 #define MEASURES_PER_BB 5
 #define SIZE_OF_HARNESS_MEM (4096 * 3)
+#define REF_COMPARE_THRESHOLD 0.2
+#define MAX_BB_LENGTH 240
+
+const int ITERS_TO_SKIP[2] = {1001, 6621};
 
 uint8_t parse_hex_digit(char c) {
   if (c >= 'a' && c <= 'f')
@@ -69,6 +73,8 @@ argv[4]: Number of basic blocks to measure, default entire input file.
 int main (int argc, char** argv)
 {
 
+  printf("%d %d\n", ITERS_TO_SKIP[0], ITERS_TO_SKIP[1]);
+
   if (argc != 3 && argc != 5)
   {
     printf("Usage: bb_measure [input filename] [output filename] (-n [iterations])\n");
@@ -106,11 +112,28 @@ int main (int argc, char** argv)
   int shm_fd_a = create_shm_fd_2("shm-path-a");
   int shm_fd_b = create_shm_fd_2("shm-path-b");
 
+  int iters_to_skip_size = sizeof(ITERS_TO_SKIP)/sizeof(int);
+
   while ( fscanf(ifile, "%s\n", line) == 1 )
   {
     // See if we've run enough iterations
     i++;
     if (numIters > -1 && i > numIters) break;
+
+    // See if we should skip this BB (numbers hard-coded for convenience)
+    int w;
+    bool skipThisIter = false;
+    for (w = 0; w < iters_to_skip_size; w++) {
+      if (i == ITERS_TO_SKIP[w]) {
+        skipThisIter = true;
+        break;
+      }
+    }
+    
+    if (skipThisIter) {
+      printf("Skipping iteration %d\n", i);
+      continue;
+    }
 
     // Ignore empty basic blocks
     if (line[0] == ',')
@@ -121,12 +144,17 @@ int main (int argc, char** argv)
 
     // Read the BB (everything until the ",")
     bb_hex = strtok(line, ",");
+    float ref_val = atof(strtok(NULL, "\n"));
 
     // Determine the unroll factors A and B according to the methodology
     // discussed in the paper.
     int bb_length = strlen(bb_hex) / 2; // Two nibble characters per byte
 
-    if (bb_length < 100) {
+    // For some reason very large BB's are breaking the program. Skip them
+    if (bb_length > MAX_BB_LENGTH) continue;
+
+    
+   /* if (bb_length < 100) {
       unrollFactorA = 100;
       unrollFactorB = 200;
     } else if (bb_length < 200) {
@@ -135,7 +163,10 @@ int main (int argc, char** argv)
     } else {
       unrollFactorA = 16;
       unrollFactorB = 32;
-    }
+    }*/
+    // TEMP (?)
+    unrollFactorA = 100;
+    unrollFactorB = 200;
     
     bb_bin = hex2bin(bb_hex);
     
@@ -143,6 +174,8 @@ int main (int argc, char** argv)
 
     int minA = -1;
     int minB = -1;
+    bool no_cache_misses_A = false;
+    bool no_cache_misses_B = false;
 
     // This whole thing executes 5 times (MEASURES_PER_BB). See "Environment Variance" section
     // in the paper
@@ -164,10 +197,19 @@ int main (int argc, char** argv)
 
         if (!countersA || !countersB)
         {
-          if (!countersA) printf("Measurement A failed on iter %d\n", i);
-          if (!countersB) printf("Measurement B failed on iter %d\n", i);
-          measurementFailed = true;
-          break;
+          if (!countersA) {
+             printf("Measurement A failed on iter %d (bb_length = %d)\n", i, bb_length);
+          } 
+          if (!countersB) {
+             printf("Measurement B failed on iter %d (bb_length = %d)\n", i, bb_length);
+          }
+          shm_unlink("shm-path-a");
+          shm_unlink("shm-path-b");
+          fclose(ifile);
+          fclose(ofile);
+          exit(-1);
+          //measurementFailed = true;
+          //break;
         }
 
         // Calculate the shortest execution time for A and B
@@ -179,6 +221,8 @@ int main (int argc, char** argv)
           int cyc_b = countersB[j].core_cyc;
           if ( cyc_a > 0 && (minA == -1 || cyc_a < minA) ) minA = cyc_a;
           if ( cyc_b > 0 && (minB == -1 || cyc_b < minB) ) minB = cyc_b;
+          no_cache_misses_A = no_cache_misses_A || (countersA[j].l1_read_misses == 0);
+          no_cache_misses_B = no_cache_misses_B || (countersB[j].l1_read_misses == 0);
         }
 
         // Invalid measurement if minB < minA
@@ -193,6 +237,35 @@ int main (int argc, char** argv)
 
     // Free the memory space that was created by hex2bin
     free(bb_bin);
+   
+    // Invalid measuremenr if we never saw 0 cache misses
+    if (!measurementFailed && (!no_cache_misses_A || !no_cache_misses_B)) {
+      printf("Invalid measurement (iter = %d) due to cache misses.\n", i);
+      measurementFailed = true;
+    }
+
+    // Invalid measurement if minB < minA
+    if (!measurementFailed && (minB <= minA)) 
+    {
+      printf("Invalid measurement (B faster than A) on iter %d: (%d, %d)\n", i, minA, minB);
+      measurementFailed = true;
+    }
+ 
+    // The estimated cycle count for the basic block is now the difference of 
+    // the minimums. Note that we do not divide by the difference in unroll 
+    // factor. I'm not sure why not, but looking at the bhive data, they 
+    // just recorded the throughput of the unrolled BB.
+    float bb_estimate = minB - minA;
+
+    // Skip the sample and mark as failure if the measurement is more than 50%
+    // different than the measurement file.
+    float ref_compare = abs(ref_val - bb_estimate) / ref_val;
+    if(!measurementFailed && (ref_compare > REF_COMPARE_THRESHOLD)) {
+      //printf("Invalid measurement (iter %d): measured throughput value (%f) was much different than reference (%f)\n",
+      //       i, bb_estimate, ref_val);
+      //printf("Unroll factors: (%d, %d). bb_length: %d\n", unrollFactorA, unrollFactorB, bb_length);
+      measurementFailed = true;
+    }     
     
     // If one of the measurements fails, discard the entire basic block.
     // Keep track of how many fail for our own bookkeeping.
@@ -202,13 +275,7 @@ int main (int argc, char** argv)
     } else {
       successes++;
     }
-   
-    // The estimated cycle count for the basic block is now the difference of 
-    // the minimums. Note that we do not divide by the difference in unroll 
-    // factor. I'm not sure why not, but looking at the bhive data, they 
-    // just recorded the throughput of the unrolled BB.
-    float bb_estimate = minB - minA;
-    
+
     // Write the data to the output file.
     fprintf(ofile, "%s,%f\n", bb_hex, bb_estimate);
     // Print the first few outputs to stdout as well (for debugging)
