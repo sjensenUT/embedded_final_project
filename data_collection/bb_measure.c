@@ -93,29 +93,45 @@ argv[4]: Number of basic blocks to measure, default entire input file.
 int main (int argc, char** argv)
 {
 
-  if (argc != 3 && argc != 5)
+  if (argc != 3 && argc != 5 && argc != 7)
   {
-    printf("Usage: bb_measure [input filename] [output filename] (-n [iterations])\n");
+    printf("Usage: bb_measure [input filename] [output filename] (-n [iterations]) (-s [starting point]\n");
     exit(-1);
   }
 
   char* ifname = argv[1];
   char* ofname = argv[2];
 
+
+  int numIters = -1;
+  if (argc >= 5 && strcmp(argv[3], "-n") == 0)
+  {
+    numIters = atoi(argv[4]);
+  }
+
+  int startingPoint = 0;
+  if (argc == 5 && strcmp(argv[3], "-s") == 0) {
+    startingPoint = atoi(argv[4]);
+  } else if (argc == 7 && strcmp(argv[5], "-s") == 0) { 
+    startingPoint = atoi(argv[6]);
+  }
+
+  bool append = (startingPoint > 0);
+
   FILE* ifile = fopen(ifname, "r");
-  FILE* ofile = fopen(ofname, "w");
+  FILE* ofile;
+  if (append) {
+    ofile = fopen(ofname, "a");
+  } else {
+    ofile = fopen(ofname, "w");
+  }
+
   if (!ifile || !ofile)
   {
     printf("Error opening file(s).\n");
     fclose(ifile);
     fclose(ofile);
     exit(-1);
-  }
-
-  int numIters = -1;
-  if (argc == 5 && strcmp(argv[3], "-n") == 0)
-  {
-    numIters = atoi(argv[4]);
   }
 
   char *bb_hex, *bb_bin;
@@ -126,16 +142,28 @@ int main (int argc, char** argv)
   int i = 0;
   int failures  = 0;
   int successes = 0;
+  int consecutiveFailures = 0;
 
   open_shms();
 
   //int iters_to_skip_size = sizeof(ITERS_TO_SKIP)/sizeof(int);
 
+  // Skip lines up to the starting point
+  if (startingPoint > 0) {
+    //printf("Skipping the first %d basic blocks...\n", startingPoint);
+    int y;
+    for (y = 0; y < startingPoint; ++y)
+    { 
+      i++;
+      fscanf(ifile, "%s\n", line); 
+    }
+  }
+
   while ( fscanf(ifile, "%s\n", line) == 1 )
   {
     // See if we've run enough iterations
     i++;
-    if (numIters > -1 && i > numIters) break;
+    if (numIters > -1 && i-startingPoint > numIters) break;
 
     /*// See if we should skip this BB (numbers hard-coded for convenience)
     int w;
@@ -224,14 +252,19 @@ int main (int argc, char** argv)
              printf("Measurement B failed on iter %d (bb_length = %d)\n", i, bb_length);
           }
           // Try to close an re-open the SHMs in hope that the next BB will succeed.
-          //reinit_shms();
-          //measurementFailed = true;
-          //break;
-          // Can't figure out how to recover from this type of failure...
-          close_shms();
-          fclose(ifile);
-          fclose(ofile);
-          exit(-1);
+          reinit_shms();
+          measurementFailed = true;
+          consecutiveFailures++;
+          if (consecutiveFailures >= 5) {
+            printf("5 consecutive failures, aborting.\n");
+            close_shms();
+            fclose(ifile);
+            fclose(ofile);
+            exit(-1);
+          }
+          break;
+        } else {
+          consecutiveFailures = 0;
         }
 
         // Calculate the shortest execution time for A and B
