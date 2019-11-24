@@ -4,3 +4,6 @@
 [submodule "bhive"]
 	path = bhive
 	url = https://github.com/ithemal/bhive
+[submodule "ithemal"]
+	path = ithemal
+	url = https://github.com/ithemal/ithemal
