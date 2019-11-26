@@ -7,7 +7,7 @@ import sys
 import subprocess
 import torch
 
-TOKENIZER_PATH = "$ITHEMAL_HOME/data_collection/build/bin/tokenizer"
+TOKENIZER_PATH = "../ithemal/data_collection/build/bin/tokenizer"
 
 timing_file = sys.argv[1]
 output_file = sys.argv[2]
@@ -62,7 +62,6 @@ for line in lines:
     id = id + 1
     if (id % 1000 == 0):
         print("Progress: i = {}".format(id))
-        break; # TEMP TEMP TEMP!!!
 
 print("torch.saving data to output file...")
 torch.save(raw_data, output_file)
