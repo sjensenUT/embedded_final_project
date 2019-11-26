@@ -14,13 +14,15 @@ make
 ```
 
 To run data collection:
-`sudo ./bb_measure [input filename] [output filename]`
+`sudo ./bb_measure.py`
 
-Where `[input filename]` is the reference file for throughput data, e.g. `../bhive/throughput/skl.csv`
+Open `bb_measure.py` and change filenames/numbers as necessary
 
-To run data collection only for the first `N` basic blocks in the input file:
-`sudo ./bb_measure [input filename] [output filename] -n N`
+To generate the raw data file:
+- Make sure you have python3 installed with packages `subprocess` and `torch`
+- Make sure Dynamorio is installed and built (see Ithemal README)
+- Set the `$DYNAMORIO_HOME` environment variable to where Dynamorio was built
+- Run `setup.sh` in this repo's top-level directory as follows: `. ./setup.sh`
+- in `data_collection/`, run (for example):
+`python3 create_raw_data.py inputfile.csv outputfile.data
 
-The script will print out a progress indicator every 100 iterations.
-
-See `run_bb_measure.sh` for an example of how to invoke the script.
