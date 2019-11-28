@@ -10,6 +10,7 @@
 #include "drreg.h"
 #include "drx.h"
 #include "string.h"
+#include "stdio.h"
 
 #ifdef WINDOWS
 #    define DISPLAY_STRING(msg) dr_messagebox(msg)
@@ -32,6 +33,8 @@ static int   bb_cnts[MAX_BBS];
 // Keeps track of the next available index in the arrays
 static unsigned int nextIndex = 0;
 
+// Output file pointer
+FILE* ofile;
 
 static void
 event_exit(void)
@@ -41,14 +44,8 @@ event_exit(void)
     int j;
     for (j = 0; j < nextIndex; j++)
     {
-      /*int len;
-      len = dr_snprintf(msg, sizeof(msg) / sizeof(msg[0]),
-            "BB: %s, Count: %d, iter: %d", bb_strs[j], bb_cnts[j], j);
-
-      DR_ASSERT(len > 0);
-      NULL_TERMINATE(msg);
-      DISPLAY_STRING(msg);*/
       printf("BB: %s, Count: %d, iter: %d\n", bb_strs[j], bb_cnts[j], j);
+      fprintf(ofile, "%s,%d\n", bb_strs[j], bb_cnts[j]);
     }
 
     dr_snprintf(msg, sizeof(msg) / sizeof(msg[0]),
@@ -84,7 +81,7 @@ event_app_instruction(void *drcontext, void *tag, instrlist_t *bb, instr_t *inst
     if (!drmgr_is_first_instr(drcontext, inst))
         return DR_EMIT_DEFAULT;
 
-    dr_printf("in dynamorio_basic_block(tag=" PFX ")\n", tag);
+    //dr_printf("in dynamorio_basic_block(tag=" PFX ")\n", tag);
     
     // Create a copy of the bb and delete the last instruction
     // Because of how DynamoRIO works, it includes the control transfer instruction
@@ -115,6 +112,7 @@ event_app_instruction(void *drcontext, void *tag, instrlist_t *bb, instr_t *inst
 
     instrlist_clear_and_destroy(drcontext, bb_copy);
 
+    // For some stupid reason this doesn't work for instructions > 32 bits
     /*byte* e = instrlist_encode(drcontext, bb_copy, buf, true);
     if (e == NULL)
     {
@@ -154,6 +152,20 @@ event_app_instruction(void *drcontext, void *tag, instrlist_t *bb, instr_t *inst
 DR_EXPORT void
 dr_client_main(client_id_t id, int argc, const char *argv[])
 {
+
+    if (argc != 2)
+    {
+      printf("Usage: /path/to/drrun -c /path/to/libbb_count.so [input filename] -- [binary]\n");
+      dr_abort();
+    }
+
+    ofile = fopen(argv[1], "w");
+    if (!ofile)
+    {
+      printf("Could not open output file.\n");
+      dr_abort();
+    }
+
     drreg_options_t ops = { sizeof(ops), 1 /*max slots needed: aflags*/, false };
     dr_set_client_name("bb_count", "");
 
