@@ -19,10 +19,10 @@
 
 #define NULL_TERMINATE(buf) buf[(sizeof(buf) / sizeof(buf[0])) - 1] = '\0'
 
-// There can't possibly be more than 50 thousand basic blocks in any given
+// There can't possibly be more than 100 thousand basic blocks in any given
 // benchmark, right?
-#define MAX_BBS     50000
-#define MAX_BB_SIZE 1000
+#define MAX_BBS     100000
+#define MAX_BB_SIZE 4000
 
 // Store data as follows: two equal-size arrays,
 // one with char*s and one with numbers
@@ -62,6 +62,14 @@ event_exit(void)
 }
 
 
+// This is the function that gets called at the beginning of each basic block.
+// All it does is increment its BB's count by 1.
+static void increment(uint bb_index)
+{
+  bb_cnts[bb_index] = bb_cnts[bb_index] + 1;
+}
+
+
 static dr_emit_flags_t
 event_app_instruction(void *drcontext, void *tag, instrlist_t *bb, instr_t *inst,
                       bool for_trace, bool translating, void *user_data)
@@ -79,9 +87,14 @@ event_app_instruction(void *drcontext, void *tag, instrlist_t *bb, instr_t *inst
     dr_printf("in dynamorio_basic_block(tag=" PFX ")\n", tag);
     
     // Create a copy of the bb and delete the last instruction
+    // Because of how DynamoRIO works, it includes the control transfer instruction
+    // at the end. We don't want it in our BB's so remove it
     instrlist_t* bb_copy = instrlist_clone(drcontext, bb);
     instrlist_remove(bb_copy, instrlist_last(bb_copy));
     //instrlist_disassemble(drcontext, tag, bb_copy, STDOUT);
+
+    // Skip BB's that are now empty when removing the last instruction.
+    if (instrlist_first(bb_copy) == instrlist_last(bb_copy)) return DR_EMIT_DEFAULT;    
 
     // Get the hex representation and copy it to the list
     // cow
@@ -120,12 +133,17 @@ event_app_instruction(void *drcontext, void *tag, instrlist_t *bb, instr_t *inst
     // Initialize the count to 0
     bb_cnts[nextIndex] = 0;
 
+    // And now do the instrumentation. Insert a clean call to the function that will
+    // increase the count for this basic block.
+    dr_insert_clean_call(drcontext, bb, instrlist_first_app(bb), (void *)increment,
+                         false /* save fpstate */, 1, OPND_CREATE_INT32(nextIndex));  
+
     // Increment the counter
     nextIndex++;
 
     if (nextIndex == MAX_BBS)
     {
-      dr_printf("Uh-oh! Encountered more BBs than expected!");
+      dr_printf("Uh-oh! Encountered more BBs than expected! Increase MAX_BBS");
       dr_abort();
     }
 
