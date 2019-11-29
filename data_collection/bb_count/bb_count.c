@@ -36,6 +36,9 @@ static unsigned int nextIndex = 0;
 // Output file pointer
 FILE* ofile;
 
+// Mutex
+void* mutex;
+
 static void
 event_exit(void)
 {
@@ -47,11 +50,15 @@ event_exit(void)
       printf("BB: %s, Count: %d, iter: %d\n", bb_strs[j], bb_cnts[j], j);
       fprintf(ofile, "%s,%d\n", bb_strs[j], bb_cnts[j]);
     }
+    
+    fflush(ofile);
 
     dr_snprintf(msg, sizeof(msg) / sizeof(msg[0]),
         "Counted executions for %d basic blocks\n", nextIndex);
     NULL_TERMINATE(msg);
     DISPLAY_STRING(msg);
+
+    dr_mutex_destroy(mutex);
 
     drx_exit();
     drreg_exit();
@@ -92,6 +99,8 @@ event_app_instruction(void *drcontext, void *tag, instrlist_t *bb, instr_t *inst
 
     // Skip BB's that are now empty when removing the last instruction.
     if (instrlist_first(bb_copy) == instrlist_last(bb_copy)) return DR_EMIT_DEFAULT;    
+
+    dr_mutex_lock(mutex);
 
     // Get the hex representation and copy it to the list
     // cow
@@ -139,6 +148,8 @@ event_app_instruction(void *drcontext, void *tag, instrlist_t *bb, instr_t *inst
     // Increment the counter
     nextIndex++;
 
+    dr_mutex_unlock(mutex);
+
     if (nextIndex == MAX_BBS)
     {
       dr_printf("Uh-oh! Encountered more BBs than expected! Increase MAX_BBS");
@@ -176,6 +187,9 @@ dr_client_main(client_id_t id, int argc, const char *argv[])
     dr_register_exit_event(event_exit);
     if (!drmgr_register_bb_instrumentation_event(NULL, event_app_instruction, NULL))
         DR_ASSERT(false);
+
+    /* initialize the mutex */
+    mutex = dr_mutex_create();
 
     /* make it easy to tell, by looking at log file, which client executed */
     dr_log(NULL, DR_LOG_ALL, 1, "Client 'bbcount' initializing\n");
