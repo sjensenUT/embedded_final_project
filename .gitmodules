@@ -7,3 +7,6 @@
 [submodule "ithemal"]
 	path = ithemal
 	url = https://github.com/ithemal/ithemal
+[submodule "Ithemal-models"]
+	path = Ithemal-models
+	url = https://github.com/ithemal/Ithemal-models.git
