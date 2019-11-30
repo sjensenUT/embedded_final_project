@@ -1,0 +1,36 @@
+bzip2:
+Predicted non-branching cycles: 11063167245.4
+Total branches:			 1484674117
+Total cycles: 			 8366283548
+Negligible unaccounted bbs
+
+mcf:
+Predicted non-branching cycles: 2317351667.26
+Total branches:			 804581062
+Total cycles:			3317514704
+Negligible unaccounted bbs
+
+hmmer:
+Predicted non-branching cycles: 1403046853.29
+Total branches:			 145937643
+Total cycles:			1638000974 
+0.92% unaccounted bbs
+
+cactusADM:
+Predicted non-branching cycles: 1232248448.48
+Total branches:			  37012316
+Total cycles:			9045759498
+0.004% unaccounted bbs
+
+gcc:
+Predicted non-branching cycles: 13638540081.8
+Total branches:			  972458348 
+Total cycles:			 4223469649
+0.015% unaccounted bbs
+
+libquantum:
+Predicted non-branching cycles: 219756055.097
+Total branches:			 53237382
+Total cycles:			309148684
+Negligible unaccounted bbs
+
